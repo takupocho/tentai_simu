@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>天体＆撮影シミュレーター (Ver 0.1)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
+<style>
+*{box-sizing:border-box}
+html,body{width:100%;height:100%;margin:0}
+body{font-family:"Yu Gothic UI","Yu Gothic","Hiragino Sans",sans-serif;display:grid;grid-template-columns:370px minmax(0,1fr);overflow:hidden;background:#f3f0ff;color:#3f3a4b;font-size:13px}
+.controls{height:100vh;overflow-y:auto;background:linear-gradient(180deg,#fff7fc 0,#f5f1ff 45%,#eef8ff 100%);padding:12px;box-shadow:3px 0 14px rgba(90,60,130,.15)}
+.brand{font-size:18px;font-weight:900;color:#55436f;margin:4px 0 2px}
+.sub{font-size:10px;color:#8b7b9c;margin-bottom:8px}
+.info{position:sticky;top:0;z-index:5;margin-bottom:10px;padding:8px 10px;background:rgba(255,255,255,.95);border:1px solid #eadff5;border-radius:12px;font-weight:800;color:#e25374;font-size:12px;line-height:1.5}
+details{background:#fff;border:1px solid #eadff5;border-radius:12px;margin-bottom:10px;padding:8px 10px}
+summary{cursor:pointer;font-weight:900;color:#55436f;font-size:14px}
+.row{display:flex;align-items:center;gap:6px;margin:6px 0;flex-wrap:wrap}
+.row>label{min-width:86px;font-weight:700;font-size:12px}
+input[type=text],input[type=number],input[type=date],input[type=time],select{padding:4px 6px;border:1px solid #cfc3e6;border-radius:6px;font-size:13px;font-family:inherit;max-width:100%}
+input[type=number]{width:74px}
+input[type=text]{flex:1;min-width:120px}
+button{padding:6px 10px;border:0;border-radius:8px;background:#7d5fd1;color:#fff;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px}
+button.sec{background:#6c757d}button.warn{background:#e67e22}button.ok{background:#2fa36b}
+.mode{display:flex;gap:6px;margin:6px 0}
+.mode label{flex:1;text-align:center;padding:6px;border:2px solid #d8c9ff;border-radius:10px;cursor:pointer;font-weight:800}
+.mode label.active{background:#7d5fd1;color:#fff;border-color:#7d5fd1}
+.mode input{display:none}
+.help{font-size:11px;color:#7a7088;line-height:1.5;margin:4px 0}
+.res{font-size:12px;line-height:1.6;background:#faf8ff;border:1px solid #e6dcf8;border-radius:8px;padding:6px 8px;margin-top:6px;white-space:pre-wrap}
+.main{position:relative;min-width:0;height:100vh}
+#map{width:100%;height:100%}
+#preview{position:absolute;z-index:900;right:14px;bottom:20px;width:330px;background:rgba(255,255,255,.96);border:2px solid #d8c9ff;border-radius:16px;padding:8px;box-shadow:0 10px 30px rgba(70,45,110,.3)}
+#preview .ttl{text-align:center;font-weight:900;color:#55436f;margin-bottom:4px;font-size:13px}
+#pvsvg{width:100%;display:block;border-radius:8px;background:#222}
+#pvTime{width:100%}
+#pvInfo{font-size:11px;text-align:center;color:#555;margin-top:2px}
+.dist-label{background:#fff;border:1px solid #999;border-radius:4px;padding:1px 4px;font-size:11px;font-weight:700}
+.tl{background:rgba(255,255,255,.9);border:1px solid #888;border-radius:3px;padding:0 3px;font-size:10px;font-weight:700;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="controls">
+  <div class="brand">🌅 天体＆撮影シミュレーター</div>
+  <div class="sub">太陽・月・天の川 × 被写体 → Google Earth Pro用KMZ (Ver 0.1)</div>
+  <div class="info" id="info">地図をクリックして「被写体」と「カメラ」を置いてください</div>
+
+  <details open><summary>1. 場所を決める</summary>
+    <div class="mode">
+      <label id="mSubj" class="active"><input type="radio" name="mode" value="subj" checked>被写体を置く</label>
+      <label id="mCam"><input type="radio" name="mode" value="cam">カメラを置く</label>
+    </div>
+    <div class="row"><label>被写体</label><input type="text" id="subjPos" placeholder="緯度, 経度を貼り付け"><button class="sec" onclick="applyPos('subj',$('subjPos').value)">反映</button></div>
+    <div class="row"><label>地面の標高</label><input type="text" id="subjElev" readonly style="max-width:90px"> <label style="min-width:auto">高さ(m)</label><input type="number" id="subjH" value="30" min="0" step="1"></div>
+    <div class="row"><label>重ねる位置</label><input type="number" id="subjFrac" value="70" min="0" max="100" step="5"> <span class="help" style="margin:0">被写体の高さの何%に天体の中心を合わせるか</span></div>
+    <div class="row"><label>カメラ</label><input type="text" id="camPos" placeholder="緯度, 経度を貼り付け"><button class="sec" onclick="applyPos('cam',$('camPos').value)">反映</button></div>
+    <div class="row"><label>地面の標高</label><input type="text" id="camElev" readonly style="max-width:90px"> <label style="min-width:auto">目線(m)</label><input type="number" id="eye" value="1.7" step="0.1"></div>
+  </details>
+
+  <details open><summary>2. 日時と天体</summary>
+    <div class="row"><label>日付</label><input type="date" id="date"> <label style="min-width:auto">UTC差</label><input type="number" id="tz" value="9" step="0.5" style="width:56px"></div>
+    <div class="row"><label>イベント</label><select id="event"><option value="sunrise">日の出</option><option value="sunset">日の入り</option><option value="moonrise">月の出</option><option value="moonset">月の入り</option><option value="manual">手動(時刻を指定)</option></select></div>
+    <div class="row"><label>時間範囲</label><input type="time" id="tStart" value="05:30"> ～ <input type="time" id="tEnd" value="06:30"> <label style="min-width:auto">刻み(分)</label><input type="number" id="step" value="5" min="1" max="60" style="width:56px"></div>
+    <div class="row"><label>表示する天体</label>
+      <label style="min-width:auto;font-weight:400"><input type="checkbox" id="bSun" checked>太陽</label>
+      <label style="min-width:auto;font-weight:400"><input type="checkbox" id="bMoon">月</label>
+      <label style="min-width:auto;font-weight:400"><input type="checkbox" id="bMw">天の川の中心</label></div>
+    <div class="help">日の出・日の入りなどを選ぶと、時間範囲がその前後に自動設定されます。時刻は現地時間です。</div>
+    <div class="res" id="eventInfo">-</div>
+  </details>
+
+  <details open><summary>3. 撮影構図</summary>
+    <div class="row"><label>焦点距離(mm)</label><input type="number" id="focal" value="400" min="10" step="10"> <label style="min-width:auto">構図</label>
+      <select id="orient"><option value="landscape">横</option><option value="portrait" selected>縦</option></select></div>
+    <div class="row"><label>向きの基準</label><select id="aim"><option value="subj">被写体の重ねる位置</option><option value="sun">太陽(選択時刻)</option><option value="moon">月(選択時刻)</option></select></div>
+    <div class="row"><label>左右調整(°)</label><input type="number" id="pan" value="0" step="0.1"> <label style="min-width:auto">上下(°)</label><input type="number" id="tiltAdj" value="0" step="0.1"></div>
+    <div class="row"><label>屈折補正</label><label style="min-width:auto;font-weight:400"><input type="checkbox" id="refr" checked>大気差を含める(地平線付近の見かけ位置)</label></div>
+    <div class="res" id="camInfo">-</div>
+  </details>
+
+  <details open><summary>4. 重なり判定（撮影位置の割り出し）</summary>
+    <div class="help">いまのカメラ位置で、天体が被写体の「重ねる位置」に最も近づく時刻を調べます。</div>
+    <div class="res" id="overlapInfo">-</div>
+    <hr style="border:0;border-top:1px solid #eadff5;margin:8px 0">
+    <div class="help"><b>逆算：</b>選んだ時刻に天体が被写体の真後ろに来るカメラ位置を、地図上の線にします（カメラはこの線上に立てばよい）。</div>
+    <div class="row"><label>対象天体</label><select id="solveBody"><option value="sun">太陽</option><option value="moon">月</option></select>
+      <button class="warn" onclick="solveCandidates()">候補ラインを計算</button><button class="sec" onclick="clearCandidates()">消す</button></div>
+    <div class="res" id="solveInfo">-</div>
+  </details>
+
+  <details open><summary>5. Google Earth Pro用に書き出し</summary>
+    <div class="row"><label>天球の半径(km)</label><input type="number" id="domeKm" value="20" min="2" max="200"></div>
+    <div class="row"><label style="min-width:auto;font-weight:400"><input type="checkbox" id="xGround" checked>地面レベルビュー</label>
+      <label style="min-width:auto;font-weight:400"><input type="checkbox" id="xFrame" checked>赤枠</label>
+      <label style="min-width:auto;font-weight:400"><input type="checkbox" id="xCand" checked>候補ライン</label>
+      <label style="min-width:auto;font-weight:400"><input type="checkbox" id="xTour" checked>時間アニメ(試験的)</label></div>
+    <div class="row"><button class="ok" onclick="exportKmz()">🌅 KMZを書き出す</button></div>
+    <div class="help">Earth Proで開くと、カメラ位置から被写体を見た画面になり、時間スライダーで天体が動きます。</div>
+  </details>
+</div>
+
+<div class="main">
+  <div id="map"></div>
+  <div id="preview">
+    <div class="ttl">撮影イメージ <span id="pvLens" style="font-weight:400"></span></div>
+    <svg id="pvsvg" viewBox="0 0 240 360"></svg>
+    <input type="range" id="pvTime" min="0" max="60" step="1" value="0">
+    <div id="pvInfo">-</div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const RAD=Math.PI/180, DEG=180/Math.PI;
+const GC_RA_H=17.7611, GC_DEC=-29.0078, NGP_RA=192.85948, NGP_DEC=27.12825, L_NCP=122.93192;
+const pad=n=>String(n).padStart(2,'0');
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+/* ---------- 地図 ---------- */
+const map=L.map('map').setView([35.36,138.73],13);
+const stdLayer=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(map);
+const aerLayer=L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',{maxZoom:18,attribution:'地理院タイル'});
+L.control.layers({'標準地図':stdLayer,'航空写真':aerLayer}).addTo(map);
+let subjMarker=null, camMarker=null;
+const overlay=L.layerGroup().addTo(map), candLayer=L.layerGroup().addTo(map);
+let candidates=[];
+const redIcon=L.icon({iconUrl:'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png',iconSize:[25,41],iconAnchor:[12,41]});
+const blueIcon=L.icon({iconUrl:'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png',iconSize:[25,41],iconAnchor:[12,41]});
+
+function setMode(m){document.querySelectorAll('input[name=mode]').forEach(r=>r.checked=r.value===m);$('mSubj').classList.toggle('active',m==='subj');$('mCam').classList.toggle('active',m==='cam');}
+document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener('change',()=>setMode(r.value)));
+map.on('click',e=>{const m=document.querySelector('input[name=mode]:checked').value;placeMarker(m,e.latlng);});
+
+function placeMarker(kind,ll){
+  const isS=kind==='subj';
+  let mk=isS?subjMarker:camMarker;
+  if(!mk){
+    mk=L.marker(ll,{draggable:true,icon:isS?redIcon:blueIcon,title:isS?'被写体':'カメラ'}).addTo(map);
+    mk.bindTooltip(isS?'被写体':'カメラ',{permanent:true,direction:'right',offset:[10,-20]});
+    mk.on('dragend',()=>refreshAll(true));
+    if(isS)subjMarker=mk;else camMarker=mk;
+    if(isS&&!camMarker)setMode('cam');
+  }else mk.setLatLng(ll);
+  refreshAll(true);
+}
+function applyPos(kind,text){
+  const m=String(text).match(/(-?\d+(?:\.\d+)?)\s*[,，\s]\s*(-?\d+(?:\.\d+)?)/);
+  if(!m){alert('「緯度, 経度」の形式で入力してください');return;}
+  const ll=L.latLng(+m[1],+m[2]);placeMarker(kind,ll);map.setView(ll,Math.max(map.getZoom(),14));
+}
+
+/* ---------- 標高(国土地理院) ---------- */
+const elevCache=new Map();
+async function getElevation(lat,lng){
+  const key=lat.toFixed(5)+','+lng.toFixed(5);
+  if(elevCache.has(key))return elevCache.get(key);
+  let v=0;
+  try{
+    const r=await fetch(`https://cyberjapandata2.gsi.go.jp/general/dem/scripts/getelevation.php?lon=${lng}&lat=${lat}&outtype=JSON`);
+    const j=await r.json();const e=parseFloat(j.elevation);v=Number.isFinite(e)?e:0;
+  }catch(e){v=0;}
+  elevCache.set(key,v);return v;
+}
+
+/* ---------- 幾何 ---------- */
+function destPoint(lat,lng,az,d){
+  const R=6371000,a=d/R,b=az*RAD,p1=lat*RAD,l1=lng*RAD;
+  const p2=Math.asin(Math.sin(p1)*Math.cos(a)+Math.cos(p1)*Math.sin(a)*Math.cos(b));
+  const l2=l1+Math.atan2(Math.sin(b)*Math.sin(a)*Math.cos(p1),Math.cos(a)-Math.sin(p1)*Math.sin(p2));
+  return {lat:p2*DEG,lng:((l2*DEG+540)%360)-180};
+}
+function bearing(lat1,lng1,lat2,lng2){
+  const p1=lat1*RAD,p2=lat2*RAD,dl=(lng2-lng1)*RAD;
+  return (Math.atan2(Math.sin(dl)*Math.cos(p2),Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(dl))*DEG+360)%360;
+}
+function hdist(lat1,lng1,lat2,lng2){return map.distance(L.latLng(lat1,lng1),L.latLng(lat2,lng2));}
+// WGS84: ENU(東・北・上)のずれを緯度・経度・高さへ。地球の丸みを含めて正確に天体方向を出す。
+const WA=6378137,WF=1/298.257223563,WE2=WF*(2-WF);
+function toEcef(lat,lon,h){const p=lat*RAD,l=lon*RAD,N=WA/Math.sqrt(1-WE2*Math.sin(p)**2);return [(N+h)*Math.cos(p)*Math.cos(l),(N+h)*Math.cos(p)*Math.sin(l),(N*(1-WE2)+h)*Math.sin(p)];}
+function fromEcef(x,y,z){
+  const l=Math.atan2(y,x),pr=Math.hypot(x,y);let p=Math.atan2(z,pr*(1-WE2)),h=0;
+  for(let i=0;i<6;i++){const N=WA/Math.sqrt(1-WE2*Math.sin(p)**2);h=pr/Math.cos(p)-N;p=Math.atan2(z,pr*(1-WE2*N/(N+h)));}
+  return {lat:p*DEG,lng:l*DEG,h};
+}
+function enuToGeo(o,e,n,u){
+  const p=o.lat*RAD,l=o.lng*RAD,c=toEcef(o.lat,o.lng,o.h);
+  const dx=-Math.sin(l)*e-Math.sin(p)*Math.cos(l)*n+Math.cos(p)*Math.cos(l)*u;
+  const dy= Math.cos(l)*e-Math.sin(p)*Math.sin(l)*n+Math.cos(p)*Math.sin(l)*u;
+  const dz= Math.cos(p)*n+Math.sin(p)*u;
+  return fromEcef(c[0]+dx,c[1]+dy,c[2]+dz);
+}
+const dirEnu=(az,alt)=>[Math.cos(alt*RAD)*Math.sin(az*RAD),Math.cos(alt*RAD)*Math.cos(az*RAD),Math.sin(alt*RAD)];
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+function angSep(az1,alt1,az2,alt2){const c=dot(dirEnu(az1,alt1),dirEnu(az2,alt2));return Math.acos(Math.max(-1,Math.min(1,c)))*DEG;}
+
+/* ---------- 天体 ---------- */
+function mkTime(min){const [y,m,d]=$('date').value.split('-').map(Number);const tz=+$('tz').value||0;return new Date(Date.UTC(y,m-1,d)+(min-tz*60)*60000);}
+function fmtMin(min){const r=Math.round(min);const day=Math.floor(r/1440);const m=r-day*1440;return `${day>0?'翌':day<0?'前':''}${pad(Math.floor(m/60))}:${pad(m%60)}`;}
+function parseHM(s){const [h,m]=s.split(':').map(Number);return h*60+m;}
+function toHM(min){const m=((Math.round(min)%1440)+1440)%1440;return `${pad(Math.floor(m/60))}:${pad(m%60)}`;}
+const refraction=()=>$('refr').checked?'normal':null;
+function gcRadec(l,b){
+  const th=(L_NCP-l)*RAD,B=b*RAD,gd=NGP_DEC*RAD;
+  const sd=Math.sin(B)*Math.sin(gd)+Math.cos(B)*Math.cos(gd)*Math.cos(th);
+  const dec=Math.asin(sd)*DEG;
+  const y=Math.cos(B)*Math.sin(th),x=Math.cos(gd)*Math.sin(B)-Math.sin(gd)*Math.cos(B)*Math.cos(th);
+  return {ra:((NGP_RA+Math.atan2(y,x)*DEG)%360+360)%360/15,dec};
+}
+function j2000Pos(raH,dec,date,obs){
+  const v=Astronomy.VectorFromSphere(new Astronomy.Spherical(dec,raH*15,1),date);
+  const vd=Astronomy.RotateVector(Astronomy.Rotation_EQJ_EQD(date),v);
+  const eq=Astronomy.EquatorFromVector(vd);
+  const h=Astronomy.Horizon(date,obs,eq.ra,eq.dec,refraction());
+  return {az:h.azimuth,alt:h.altitude};
+}
+function skyPos(key,date,obs){
+  if(key==='mw')return {...j2000Pos(GC_RA_H,GC_DEC,date,obs),r:3};
+  const body=key==='sun'?Astronomy.Body.Sun:Astronomy.Body.Moon;
+  const eq=Astronomy.Equator(body,date,obs,true,true);
+  const h=Astronomy.Horizon(date,obs,eq.ra,eq.dec,refraction());
+  const km=eq.dist*149597870.7;
+  return {az:h.azimuth,alt:h.altitude,r:Math.asin((key==='sun'?696000:1737.4)/km)*DEG};
+}
+const BODY_NAME={sun:'太陽',moon:'月',mw:'天の川の中心'};
+const BODY_COLOR={sun:'#ffd23a',moon:'#f2f2f2',mw:'#5ab4ff'};
+const activeBodies=()=>['sun','moon','mw'].filter(k=>$({sun:'bSun',moon:'bMoon',mw:'bMw'}[k]).checked);
+
+/* ---------- 状態 ---------- */
+async function readState(){
+  const S={focal:+$('focal').value||50,portrait:$('orient').value==='portrait',eye:+$('eye').value||0,
+    H:+$('subjH').value||0,frac:(+$('subjFrac').value||0)/100,pan:+$('pan').value||0,tiltAdj:+$('tiltAdj').value||0};
+  if(subjMarker){const p=subjMarker.getLatLng();S.subj={lat:p.lat,lng:p.lng,g:await getElevation(p.lat,p.lng)};}
+  if(camMarker){const p=camMarker.getLatLng();S.cam={lat:p.lat,lng:p.lng,g:await getElevation(p.lat,p.lng)};S.cam.h=S.cam.g+S.eye;}
+  if(S.subj)S.targetAbs=S.subj.g+S.H*S.frac;
+  return S;
+}
+function sensor(S){return S.portrait?{w:24,h:36}:{w:36,h:24};}
+function hfov(S){return 2*Math.atan(sensor(S).w/(2*S.focal))*DEG;}
+function vfov(S){return 2*Math.atan(sensor(S).h/(2*S.focal))*DEG;}
+const windowMin=()=>{let a=parseHM($('tStart').value),b=parseHM($('tEnd').value);if(b<=a)b+=1440;return [a,b];};
+function obsOf(S){const p=S.cam||S.subj||{lat:map.getCenter().lat,lng:map.getCenter().lng,g:0,h:0};return new Astronomy.Observer(p.lat,p.lng,p.h??p.g??0);}
+// 被写体の目標点とカメラの関係
+function subjGeometry(S){
+  if(!S.subj||!S.cam)return null;
+  const d=hdist(S.cam.lat,S.cam.lng,S.subj.lat,S.subj.lng);
+  const az=bearing(S.cam.lat,S.cam.lng,S.subj.lat,S.subj.lng);
+  const altT=Math.atan2(S.targetAbs-S.cam.h,d)*DEG;
+  const altTop=Math.atan2(S.subj.g+S.H-S.cam.h,d)*DEG;
+  const altBase=Math.atan2(S.subj.g-S.cam.h,d)*DEG;
+  return {d,az,altT,altTop,altBase};
+}
+// 光軸の向き(方位・仰角)
+function aimOf(S,min){
+  const g=subjGeometry(S);
+  let az=g?g.az:0,alt=g?g.altT:0;
+  const a=$('aim').value;
+  if(a!=='subj'&&S.cam){const p=skyPos(a,mkTime(min),obsOf(S));az=p.az;alt=p.alt;}
+  return {az:az+S.pan,alt:alt+S.tiltAdj};
+}
+function camBasis(az,alt){
+  const f=dirEnu(az,alt),r=[Math.cos(az*RAD),-Math.sin(az*RAD),0],u=cross(r,f);
+  return {f,r,u};
+}
+
+/* ---------- イベント ---------- */
+async function applyEvent(){
+  const ev=$('event').value;
+  const S=await readState();
+  const obs=obsOf(S);
+  if(ev==='manual'){return;}
+  const body=ev.startsWith('sun')?Astronomy.Body.Sun:Astronomy.Body.Moon;
+  const dir=ev.endsWith('rise')?1:-1;
+  const [y,m,d]=$('date').value.split('-').map(Number);
+  const tz=+$('tz').value||0;
+  const start=new Date(Date.UTC(y,m-1,d)-tz*3600000);
+  const t=Astronomy.SearchRiseSet(body,obs,dir,start,1.2);
+  if(!t){$('eventInfo').textContent='この日はイベントがありません';return;}
+  const min=(t.date.getTime()-Date.UTC(y,m-1,d))/60000+tz*60;
+  const from=dir>0?min-10:min-50,to=dir>0?min+50:min+10;
+  $('tStart').value=toHM(from);$('tEnd').value=toHM(to);
+  $('bSun').checked=ev.startsWith('sun');$('bMoon').checked=ev.startsWith('moon');
+  $('solveBody').value=ev.startsWith('sun')?'sun':'moon';
+  const key=ev.startsWith('sun')?'sun':'moon';
+  const p=skyPos(key,t.date,obs);
+  $('eventInfo').textContent=`${BODY_NAME[key]}の${dir>0?'出':'入'}  ${fmtMin(min)}  方位 ${p.az.toFixed(1)}°`;
+}
+
+/* ---------- 描画: 地図 ---------- */
+async function refreshAll(fetchElev){
+  const S=await readState();
+  if(subjMarker)$('subjPos').value=`${S.subj.lat.toFixed(6)}, ${S.subj.lng.toFixed(6)}`,$('subjElev').value=S.subj.g.toFixed(1)+' m';
+  if(camMarker)$('camPos').value=`${S.cam.lat.toFixed(6)}, ${S.cam.lng.toFixed(6)}`,$('camElev').value=S.cam.g.toFixed(1)+' m';
+  const [a,b]=windowMin();
+  const sl=$('pvTime');const cur=+sl.value;
+  sl.min=a;sl.max=b;sl.step=1;if(!(cur>=a&&cur<=b))sl.value=Math.round((a+b)/2);
+  drawMap(S);drawPreview(S);overlapAnalysis(S);saveSettings();
+}
+function drawMap(S){
+  overlay.clearLayers();
+  const g=subjGeometry(S);
+  if(S.cam&&S.subj){
+    L.polyline([[S.cam.lat,S.cam.lng],[S.subj.lat,S.subj.lng]],{color:'#e6b800',dashArray:'5,8'}).addTo(overlay);
+    L.marker([(S.cam.lat+S.subj.lat)/2,(S.cam.lng+S.subj.lng)/2],{icon:L.divIcon({className:'dist-label',html:`${(g.d/1000).toFixed(2)} km`,iconSize:[60,18],iconAnchor:[30,9]}),interactive:false}).addTo(overlay);
+    const aim=aimOf(S,+$('pvTime').value),hf=hfov(S),R=Math.max(g.d,300);
+    const pts=[[S.cam.lat,S.cam.lng]];
+    for(let i=0;i<=24;i++){const p=destPoint(S.cam.lat,S.cam.lng,aim.az-hf/2+hf*i/24,R);pts.push([p.lat,p.lng]);}
+    L.polygon(pts,{color:'#e8433a',weight:2,fillOpacity:.12,interactive:false}).addTo(overlay);
+    $('camInfo').textContent=`被写体まで ${(g.d).toFixed(0)} m / 方位 ${g.az.toFixed(1)}°\n目標点の仰角 ${g.altT.toFixed(2)}°（頂上 ${g.altTop.toFixed(2)}° / 根元 ${g.altBase.toFixed(2)}°）\n画角 横${hfov(S).toFixed(2)}° 縦${vfov(S).toFixed(2)}°（${S.focal}mm ${S.portrait?'縦':'横'}）`;
+  }
+  // 選択時刻の天体方向 + 出没時の方位線
+  const base=S.cam||S.subj;if(!base)return;
+  const obs=obsOf(S),tmin=+$('pvTime').value;
+  const col={sun:'#ff8c00',moon:'#888',mw:'#2a7fff'};
+  activeBodies().forEach(k=>{
+    const [a,b]=windowMin();
+    const p0=skyPos(k,mkTime(a),obs),p1=skyPos(k,mkTime(b),obs),pc=skyPos(k,mkTime(tmin),obs);
+    [[p0,toHM(a),'1'],[p1,toHM(b),'1'],[pc,toHM(tmin),'3']].forEach(([p,lab,w])=>{
+      const e=destPoint(base.lat,base.lng,p.az,6000);
+      L.polyline([[base.lat,base.lng],[e.lat,e.lng]],{color:col[k],weight:+w,opacity:w==='3'?.95:.5,dashArray:w==='3'?null:'4,6'}).addTo(overlay);
+      L.marker([e.lat,e.lng],{icon:L.divIcon({className:'tl',html:`${BODY_NAME[k]} ${lab} 方位${p.az.toFixed(0)}°`,iconSize:null,iconAnchor:[0,0]}),interactive:false}).addTo(overlay);
+    });
+  });
+}
+
+/* ---------- 描画: 撮影イメージ ---------- */
+function drawPreview(S){
+  const svg=$('pvsvg');const sn=sensor(S);const K=10;const W=sn.w*K,H=sn.h*K;
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  $('pvLens').textContent=`${S.focal}mm ${S.portrait?'縦':'横'}  ${hfov(S).toFixed(1)}°×${vfov(S).toFixed(1)}°`;
+  const tmin=+$('pvTime').value;
+  if(!S.cam||!S.subj){svg.innerHTML=`<rect width="${W}" height="${H}" fill="#223"/><text x="${W/2}" y="${H/2}" fill="#aaa" font-size="12" text-anchor="middle">被写体とカメラを置いてください</text>`;$('pvInfo').textContent='-';return;}
+  const g=subjGeometry(S);const aim=aimOf(S,tmin);const B=camBasis(aim.az,aim.alt);
+  const proj=(az,alt)=>{const v=dirEnu(az,alt),z=dot(v,B.f);if(z<=0.02)return null;return {x:W/2+S.focal*dot(v,B.r)/z*K,y:H/2-S.focal*dot(v,B.u)/z*K};};
+  let out=`<defs><linearGradient id="sky" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#f4a15a"/><stop offset="0.5" stop-color="#7a8fc4"/><stop offset="1" stop-color="#2a3e6e"/></linearGradient><clipPath id="cl"><rect width="${W}" height="${H}"/></clipPath></defs><rect width="${W}" height="${H}" fill="url(#sky)"/><g clip-path="url(#cl)">`;
+  // 地平線(alt=0)と地面側の塗り
+  const hp=[];for(let a=-90;a<=90;a+=2){const p=proj(aim.az+a,0);if(p)hp.push(p);}
+  if(hp.length>1){const below=hp.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    out+=`<polygon points="${below} ${hp[hp.length-1].x.toFixed(1)},${H*3} ${hp[0].x.toFixed(1)},${H*3}" fill="#14110f" opacity=".92"/><polyline points="${below}" fill="none" stroke="#c9b27a" stroke-width="0.8" stroke-dasharray="3,2"/>`;}
+  // 天体の軌跡と円盤
+  const [a,b]=windowMin(),stepM=Math.max(1,+$('step').value||5),obs=obsOf(S);
+  activeBodies().forEach(k=>{
+    const pts=[];
+    for(let m=a;m<=b+0.01;m+=1){const p=skyPos(k,mkTime(m),obs);const q=proj(p.az,p.alt);if(q)pts.push(q);}
+    if(pts.length>1)out+=`<polyline points="${pts.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' ')}" fill="none" stroke="${BODY_COLOR[k]}" stroke-width="0.7" opacity=".6"/>`;
+    for(let m=a;m<=b+0.01;m+=stepM){
+      const p=skyPos(k,mkTime(m),obs),q=proj(p.az,p.alt);if(!q)continue;
+      const r=Math.max(1.2,S.focal*Math.tan(p.r*RAD)*K);
+      out+=`<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="${r.toFixed(1)}" fill="${BODY_COLOR[k]}" opacity=".28" stroke="${BODY_COLOR[k]}" stroke-width=".5"/>`;
+      out+=`<text x="${(q.x+r+2).toFixed(1)}" y="${(q.y+3).toFixed(1)}" font-size="7" fill="#fff" opacity=".85">${toHM(m)}</text>`;
+    }
+    const pc=skyPos(k,mkTime(tmin),obs),qc=proj(pc.az,pc.alt);
+    if(qc){const r=Math.max(1.8,S.focal*Math.tan(pc.r*RAD)*K);out+=`<circle cx="${qc.x.toFixed(1)}" cy="${qc.y.toFixed(1)}" r="${r.toFixed(1)}" fill="${BODY_COLOR[k]}" stroke="#fff" stroke-width="1"/>`;}
+  });
+  // 被写体(根元～頂上)
+  const top=proj(g.az,g.altTop),base=proj(g.az,g.altBase),tgt=proj(g.az,g.altT);
+  if(top&&base){
+    const wpx=Math.max(1.5,S.focal*Math.atan2(Math.max(1,S.H*0.04),g.d)*K);
+    out+=`<line x1="${base.x.toFixed(1)}" y1="${base.y.toFixed(1)}" x2="${top.x.toFixed(1)}" y2="${top.y.toFixed(1)}" stroke="#050505" stroke-width="${wpx.toFixed(1)}"/>`;
+  }
+  if(tgt)out+=`<g stroke="#ff3b30" stroke-width="0.8"><line x1="${tgt.x-5}" y1="${tgt.y}" x2="${tgt.x+5}" y2="${tgt.y}"/><line x1="${tgt.x}" y1="${tgt.y-5}" x2="${tgt.x}" y2="${tgt.y+5}"/></g>`;
+  out+='</g>';
+  svg.innerHTML=out;
+  const lines=activeBodies().map(k=>{const p=skyPos(k,mkTime(tmin),obs);return `${BODY_NAME[k]} 方位${p.az.toFixed(1)}° 高度${p.alt.toFixed(1)}°`;});
+  $('pvInfo').textContent=`${fmtMin(tmin)}　${lines.join(' / ')}`;
+}
+
+/* ---------- 重なり判定 ---------- */
+function overlapAnalysis(S){
+  const el=$('overlapInfo');
+  if(!S.cam||!S.subj){el.textContent='被写体とカメラを置くと表示されます';return;}
+  const g=subjGeometry(S),obs=obsOf(S),[a,b]=windowMin();let txt='';
+  const ks=activeBodies().filter(k=>k!=='mw');
+  if(!ks.length){el.textContent='太陽か月を選んでください';return;}
+  ks.forEach(k=>{
+    let best=null;
+    for(let m=a;m<=b+0.01;m+=0.25){
+      const p=skyPos(k,mkTime(m),obs),s=angSep(p.az,p.alt,g.az,g.altT);
+      if(!best||s<best.s)best={s,m,p};
+    }
+    const p=best.p;
+    const dAz=((p.az-g.az+540)%360-180)*Math.cos(p.alt*RAD);
+    const where=p.alt>g.altTop?'頂上より上':p.alt<g.altBase?'根元より下':'塔の高さの範囲内';
+    const hit=best.s<=p.r?'◎ 目標点に重なる':best.s<=p.r*2?'○ ほぼ重なる':'× ずれる';
+    txt+=`${BODY_NAME[k]}: 最接近 ${fmtMin(best.m)}（${best.s.toFixed(2)}° / 視半径${p.r.toFixed(2)}°） ${hit}\n  そのとき高度${p.alt.toFixed(2)}° 方位差 ${dAz>=0?'+':''}${dAz.toFixed(2)}°（${dAz>=0?'右':'左'}へずれ）縦位置: ${where}\n`;
+  });
+  txt+=`被写体の見かけの大きさ 高さ${(Math.atan2(S.H,g.d)*DEG).toFixed(2)}°（太陽の約${(Math.atan2(S.H,g.d)*DEG/0.533).toFixed(1)}倍）`;
+  el.textContent=txt;
+}
+
+/* ---------- 逆算: 候補ライン ---------- */
+async function computeCandidates(S,key){
+  if(!S.subj)return [];
+  const obs=new Astronomy.Observer(S.subj.lat,S.subj.lng,S.subj.g);
+  const [a,b]=windowMin(),stepM=Math.max(1,+$('step').value||5),out=[];
+  for(let m=a;m<=b+0.01;m+=stepM){
+    const p=skyPos(key,mkTime(m),obs);
+    if(p.alt<0.15||p.alt>60)continue;
+    // 最初は被写体と同じ高さの地面を仮定し、候補位置の標高で数回補正する
+    const back=(p.az+180)%360;let gnd=S.subj.g,d=0,pos=null,ok=true;
+    for(let it=0;it<4;it++){
+      const dh=S.targetAbs-(gnd+S.eye);
+      d=dh/Math.tan(p.alt*RAD);
+      if(!(d>30&&d<40000)){ok=false;break;}
+      pos=destPoint(S.subj.lat,S.subj.lng,back,d);
+      gnd=await getElevation(pos.lat,pos.lng);
+    }
+    if(ok)out.push({m,az:p.az,alt:p.alt,d,lat:pos.lat,lng:pos.lng,g:gnd});
+  }
+  return out;
+}
+async function solveCandidates(){
+  const S=await readState();
+  if(!S.subj){alert('先に被写体を置いてください');return;}
+  const key=$('solveBody').value;
+  $('solveInfo').textContent='計算中…（標高を取得しています）';
+  candidates=await computeCandidates(S,key);candidatesKey=key;
+  drawCandidates();
+  if(!candidates.length){$('solveInfo').textContent='この時間帯には条件を満たす位置がありません（天体が低すぎる/高すぎる、または被写体がカメラより低い）';return;}
+  $('solveInfo').textContent=candidates.map(c=>`${fmtMin(c.m)}  距離${(c.d/1000).toFixed(2)}km  方位${c.az.toFixed(1)}° 高度${c.alt.toFixed(2)}°`).join('\n')+'\n※地図の点をクリックするとカメラをその位置へ移します';
+}
+let candidatesKey='sun';
+function drawCandidates(){
+  candLayer.clearLayers();
+  if(!candidates.length)return;
+  L.polyline(candidates.map(c=>[c.lat,c.lng]),{color:'#d6336c',weight:3,opacity:.85}).addTo(candLayer);
+  candidates.forEach(c=>{
+    const mk=L.circleMarker([c.lat,c.lng],{radius:6,color:'#d6336c',fillColor:'#fff',fillOpacity:1,weight:2}).addTo(candLayer);
+    mk.bindTooltip(`${fmtMin(c.m)}  ${(c.d/1000).toFixed(2)}km`,{permanent:true,direction:'top',className:'tl'});
+    mk.on('click',()=>{placeMarker('cam',L.latLng(c.lat,c.lng));$('pvTime').value=Math.round(c.m);refreshAll();});
+  });
+}
+function clearCandidates(){candidates=[];candLayer.clearLayers();$('solveInfo').textContent='-';}
+
+/* ---------- KMZ ---------- */
+function sphereDae(name,color){
+  const pos=[],idx=[],N=24,M=12;
+  for(let j=0;j<=M;j++){const th=Math.PI*j/M;for(let i=0;i<N;i++){const ph=2*Math.PI*i/N;pos.push(Math.sin(th)*Math.cos(ph),Math.sin(th)*Math.sin(ph),Math.cos(th));}}
+  for(let j=0;j<M;j++)for(let i=0;i<N;i++){const a=j*N+i,b=j*N+(i+1)%N,c=(j+1)*N+i,d=(j+1)*N+(i+1)%N;idx.push(a,c,b,b,c,d);}
+  const hex=color.replace('#',''),rgb=[0,2,4].map(i=>(parseInt(hex.slice(i,i+2),16)/255).toFixed(4)).join(' ');
+  return `<?xml version="1.0" encoding="UTF-8"?><COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1"><asset><unit name="meter" meter="1"/><up_axis>Z_UP</up_axis></asset><library_effects><effect id="e"><profile_COMMON><technique sid="common"><constant><emission><color>${rgb} 1</color></emission></constant></technique></profile_COMMON><extra><technique profile="GOOGLEEARTH"><double_sided>1</double_sided></technique></extra></effect></library_effects><library_materials><material id="m" name="m"><instance_effect url="#e"/></material></library_materials><library_geometries><geometry id="g" name="${name}"><mesh><source id="p"><float_array id="pa" count="${pos.length}">${pos.map(v=>v.toFixed(5)).join(' ')}</float_array><technique_common><accessor source="#pa" count="${pos.length/3}" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor></technique_common></source><vertices id="v"><input semantic="POSITION" source="#p"/></vertices><triangles material="m" count="${idx.length/3}"><input semantic="VERTEX" source="#v" offset="0"/><p>${idx.join(' ')}</p></triangles></mesh></geometry></library_geometries><library_visual_scenes><visual_scene id="s"><node id="n"><instance_geometry url="#g"><bind_material><technique_common><instance_material symbol="m" target="#m"/></technique_common></bind_material></instance_geometry></node></visual_scene></library_visual_scenes><scene><instance_visual_scene url="#s"/></scene></COLLADA>`;
+}
+const iso=d=>d.toISOString().replace(/\.\d+Z$/,'Z');
+const c3=p=>`${p.lng.toFixed(7)},${p.lat.toFixed(7)},${p.h.toFixed(2)}`;
+
+async function exportKmz(){
+  const S=await readState();
+  if(!S.subj||!S.cam){alert('被写体とカメラを置いてください');return;}
+  const g=subjGeometry(S),obs=obsOf(S),[a,b]=windowMin(),stepM=Math.max(1,+$('step').value||5);
+  const R=(+$('domeKm').value||20)*1000;
+  const camO={lat:S.cam.lat,lng:S.cam.lng,h:S.cam.h};
+  const name=`天体シミュレーション ${$('date').value}`;
+  const dome=(az,alt,r)=>{const e=dirEnu(az,alt);return enuToGeo(camO,e[0]*r,e[1]*r,e[2]*r);};
+  const ks=activeBodies();
+  const files={};let folders='';
+  // 天体モデル
+  for(const k of ks.filter(x=>x!=='mw')){
+    files[`models/${k}.dae`]=sphereDae(k,BODY_COLOR[k]);
+    let timed='',all='',pts=[];
+    for(let m=a;m<=b+0.01;m+=stepM){
+      const t0=mkTime(m),t1=mkTime(m+stepM);
+      const p=skyPos(k,t0,obs);if(p.alt<-1)continue;
+      const q=dome(p.az,Math.max(p.alt,-0.5),R);pts.push(q);
+      const rad=R*Math.tan(p.r*RAD);
+      const label=`${BODY_NAME[k]} ${fmtMin(m)} 方位${p.az.toFixed(1)}° 高度${p.alt.toFixed(2)}°`;
+      const model=ts=>`<Placemark><name>${esc(label)}</name>${ts}<Model><altitudeMode>absolute</altitudeMode><Location><longitude>${q.lng.toFixed(8)}</longitude><latitude>${q.lat.toFixed(8)}</latitude><altitude>${q.h.toFixed(2)}</altitude></Location><Orientation><heading>0</heading><tilt>0</tilt><roll>0</roll></Orientation><Scale><x>${rad.toFixed(2)}</x><y>${rad.toFixed(2)}</y><z>${rad.toFixed(2)}</z></Scale><Link><href>models/${k}.dae</href></Link></Model></Placemark>`;
+      all+=model('');
+      timed+=model(`<TimeSpan><begin>${iso(t0)}</begin><end>${iso(t1)}</end></TimeSpan>`);
+    }
+    const trail=pts.length>1?`<Placemark><name>${BODY_NAME[k]}の軌跡</name><styleUrl>#l_${k}</styleUrl><LineString><altitudeMode>absolute</altitudeMode><coordinates>${pts.map(c3).join(' ')}</coordinates></LineString></Placemark>`:'';
+    folders+=`<Folder><name>${BODY_NAME[k]}（時間スライダー連動）</name><visibility>0</visibility>${timed}</Folder><Folder><name>${BODY_NAME[k]}（全時刻を同時表示）</name>${all}${trail}</Folder>`;
+  }
+  // 天の川の中心と銀河面
+  if(ks.includes('mw')){
+    let pts='',marks='';const lp=[];
+    for(let m=a;m<=b+0.01;m+=stepM){
+      const p=skyPos('mw',mkTime(m),obs);if(p.alt<-1)continue;
+      const q=dome(p.az,p.alt,R);lp.push(q);
+      marks+=`<Placemark><name>天の川の中心 ${fmtMin(m)} 方位${p.az.toFixed(0)}° 高度${p.alt.toFixed(1)}°</name><TimeStamp><when>${iso(mkTime(m))}</when></TimeStamp><styleUrl>#s_mw</styleUrl><Point><altitudeMode>absolute</altitudeMode><coordinates>${c3(q)}</coordinates></Point></Placemark>`;
+    }
+    const mid=mkTime((a+b)/2);let plane='';
+    for(const [bb,st,nm] of [[0,'l_plane','銀河面の中心線'],[12,'l_planeEdge','銀河面 +12°'],[-12,'l_planeEdge','銀河面 -12°']]){
+      let seg=[];const flush=()=>{if(seg.length>1)plane+=`<Placemark><name>${nm}</name><styleUrl>#${st}</styleUrl><LineString><altitudeMode>absolute</altitudeMode><coordinates>${seg.map(c3).join(' ')}</coordinates></LineString></Placemark>`;seg=[];};
+      for(let l=0;l<=360;l+=3){const rd=gcRadec(l,bb),p=j2000Pos(rd.ra,rd.dec,mid,obs);if(p.alt>=0)seg.push(dome(p.az,p.alt,R));else flush();}
+      flush();
+    }
+    folders+=`<Folder><name>天の川の中心（${toHM((a+b)/2)}時点の銀河面つき）</name>${lp.length>1?`<Placemark><name>天の川の中心の軌跡</name><styleUrl>#l_mw</styleUrl><LineString><altitudeMode>absolute</altitudeMode><coordinates>${lp.map(c3).join(' ')}</coordinates></LineString></Placemark>`:''}${marks}${plane}</Folder>`;
+  }
+  // 被写体・カメラ・赤枠
+  const sTop=enuToGeo({lat:S.subj.lat,lng:S.subj.lng,h:S.subj.g},0,0,S.H);
+  const sTgt=enuToGeo({lat:S.subj.lat,lng:S.subj.lng,h:S.subj.g},0,0,S.H*S.frac);
+  let main=`<Folder><name>被写体とカメラ</name><Placemark><name>被写体（高さ${S.H}m）</name><styleUrl>#s_subj</styleUrl><LineString><extrude>1</extrude><altitudeMode>absolute</altitudeMode><coordinates>${c3({lat:S.subj.lat,lng:S.subj.lng,h:S.subj.g})} ${c3(sTop)}</coordinates></LineString></Placemark><Placemark><name>重ねる位置（${Math.round(S.frac*100)}%）</name><styleUrl>#s_mark</styleUrl><Point><altitudeMode>absolute</altitudeMode><coordinates>${c3(sTgt)}</coordinates></Point></Placemark><Placemark><name>カメラ位置</name><styleUrl>#s_cam</styleUrl><Point><altitudeMode>absolute</altitudeMode><coordinates>${c3(camO)}</coordinates></Point></Placemark><Placemark><name>カメラ→被写体</name><styleUrl>#l_dist</styleUrl><LineString><altitudeMode>absolute</altitudeMode><coordinates>${c3(camO)} ${c3(sTgt)}</coordinates></LineString></Placemark></Folder>`;
+  // 視点
+  const mid=Math.round((a+b)/2);
+  const aim=aimOf(S,+$('pvTime').value||mid),B=camBasis(aim.az,aim.alt);
+  const hf=hfov(S);
+  const camera=(extra='')=>`<Camera>${$('xGround').checked?'<gx:ViewerOptions><gx:option name="groundlevel" enabled="1"/></gx:ViewerOptions>':''}${extra}<longitude>${S.cam.lng.toFixed(8)}</longitude><latitude>${S.cam.lat.toFixed(8)}</latitude><altitude>${$('xGround').checked?S.eye:S.cam.h.toFixed(2)}</altitude><heading>${((aim.az%360)+360)%360}</heading><tilt>${(90+aim.alt).toFixed(3)}</tilt><roll>0</roll><altitudeMode>${$('xGround').checked?'relativeToGround':'absolute'}</altitudeMode><gx:horizFov>${hf.toFixed(3)}</gx:horizFov></Camera>`;
+  if($('xFrame').checked){
+    const sn=sensor(S),dist=Math.max(g.d,200)/Math.cos(Math.max(-1.2,Math.min(1.2,aim.alt*RAD)));
+    const cs=[[-1,-1],[1,-1],[1,1],[-1,1],[-1,-1]].map(([sx,sy])=>{
+      const v=[0,1,2].map(i=>B.f[i]+B.r[i]*sx*sn.w/2/S.focal+B.u[i]*sy*sn.h/2/S.focal);
+      return enuToGeo(camO,v[0]*dist,v[1]*dist,v[2]*dist);});
+    const co=cs.map(c3).join(' ');
+    main+=`<Folder><name>赤枠（${S.focal}mm ${S.portrait?'縦':'横'}・被写体の距離に表示）</name><Placemark><name>赤枠の縁取り</name><styleUrl>#l_haloFrame</styleUrl><LineString><altitudeMode>absolute</altitudeMode><coordinates>${co}</coordinates></LineString></Placemark><Placemark><name>赤枠</name><styleUrl>#l_frame</styleUrl><LineString><altitudeMode>absolute</altitudeMode><coordinates>${co}</coordinates></LineString></Placemark></Folder>`;
+  }
+  // 候補ライン
+  if($('xCand').checked){
+    if(!candidates.length||candidatesKey===''){candidates=await computeCandidates(S,$('solveBody').value);candidatesKey=$('solveBody').value;}
+    if(candidates.length){
+      main+=`<Folder><name>撮影位置の候補ライン（${BODY_NAME[candidatesKey]}が被写体の${Math.round(S.frac*100)}%に重なる位置）</name><Placemark><name>候補ライン</name><styleUrl>#l_cand</styleUrl><LineString><tessellate>1</tessellate><altitudeMode>clampToGround</altitudeMode><coordinates>${candidates.map(c=>`${c.lng.toFixed(7)},${c.lat.toFixed(7)},0`).join(' ')}</coordinates></LineString></Placemark>${candidates.map(c=>`<Placemark><name>${fmtMin(c.m)}（距離${(c.d/1000).toFixed(2)}km）</name><description>${BODY_NAME[candidatesKey]} 方位${c.az.toFixed(1)}° 高度${c.alt.toFixed(2)}°\n緯度経度 ${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}（標高${c.g.toFixed(0)}m）</description><styleUrl>#s_cand</styleUrl><Point><altitudeMode>clampToGround</altitudeMode><coordinates>${c.lng.toFixed(7)},${c.lat.toFixed(7)},0</coordinates></Point></Placemark>`).join('')}</Folder>`;
+    }
+  }
+  // ツアー(時刻を進めながら同じ視点を保つ)
+  let tour='';
+  if($('xTour').checked){
+    let steps='';
+    for(let m=a;m<=b+0.01;m+=stepM)steps+=`<gx:FlyTo><gx:duration>0.6</gx:duration><gx:flyToMode>smooth</gx:flyToMode>${camera(`<gx:TimeStamp><when>${iso(mkTime(m))}</when></gx:TimeStamp>`)}</gx:FlyTo>`;
+    tour=`<gx:Tour><name>▶ 時間アニメーション（${fmtMin(a)}～${fmtMin(b)}）</name><gx:Playlist>${steps}</gx:Playlist></gx:Tour>`;
+  }
+  const styles=`<Style id="s_subj"><LineStyle><color>ff0000ff</color><width>5</width></LineStyle><PolyStyle><color>440000ff</color></PolyStyle></Style><Style id="s_mark"><IconStyle><color>ff3b30ff</color><scale>0.8</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/target.png</href></Icon></IconStyle></Style><Style id="s_cam"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/shapes/camera.png</href></Icon></IconStyle></Style><Style id="l_dist"><LineStyle><color>ff00d7ff</color><width>2</width></LineStyle></Style><Style id="l_sun"><LineStyle><color>ff00a5ff</color><width>2</width></LineStyle></Style><Style id="l_moon"><LineStyle><color>fff0f0f0</color><width>2</width></LineStyle></Style><Style id="l_mw"><LineStyle><color>ffffb450</color><width>2</width></LineStyle></Style><Style id="s_mw"><IconStyle><color>ffffb450</color><Icon><href>http://maps.google.com/mapfiles/kml/shapes/star.png</href></Icon></IconStyle></Style><Style id="l_plane"><LineStyle><color>c8ffd2a0</color><width>3</width></LineStyle></Style><Style id="l_planeEdge"><LineStyle><color>78ffd2a0</color><width>1</width></LineStyle></Style><Style id="l_haloFrame"><LineStyle><color>ddffffff</color><width>9</width></LineStyle></Style><Style id="l_frame"><LineStyle><color>ff0000ff</color><width>5</width></LineStyle></Style><Style id="l_cand"><LineStyle><color>ff486cd6</color><width>4</width></LineStyle></Style><Style id="s_cand"><IconStyle><color>ff486cd6</color><scale>0.9</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle></Style>`;
+  const desc=`カメラ 北緯${S.cam.lat.toFixed(6)} 東経${S.cam.lng.toFixed(6)} / 被写体 北緯${S.subj.lat.toFixed(6)} 東経${S.subj.lng.toFixed(6)} 高さ${S.H}m / ${$('date').value} UTC${$('tz').value>=0?'+':''}${$('tz').value} / 方位は真北基準`;
+  const kml=`<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Document><name>${esc(name)}</name><description>${esc(desc)}</description>${camera()}${styles}${main}${folders}${tour}${`<Folder><name>固定カメラ（ダブルクリックで撮影視点へ）</name>${camera()}</Folder>`}</Document></kml>`;
+  new DOMParser().parseFromString(kml,'application/xml');
+  const zip=new JSZip();zip.file('doc.kml',kml);Object.entries(files).forEach(([p,x])=>zip.file(p,x));
+  const blob=await zip.generateAsync({type:'blob',mimeType:'application/vnd.google-earth.kmz',compression:'DEFLATE'});
+  const url=URL.createObjectURL(blob),link=document.createElement('a');
+  link.href=url;link.download=`${name}_${S.focal}mm.kmz`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+
+/* ---------- 保存/起動 ---------- */
+const FIELDS=['subjH','subjFrac','eye','date','tz','event','tStart','tEnd','step','focal','orient','aim','pan','tiltAdj','refr','domeKm','solveBody','bSun','bMoon','bMw','xGround','xFrame','xCand','xTour'];
+function saveSettings(){
+  try{
+    const o={};FIELDS.forEach(f=>{const e=$(f);o[f]=e.type==='checkbox'?e.checked:e.value;});
+    if(subjMarker)o.subj=subjMarker.getLatLng();if(camMarker)o.cam=camMarker.getLatLng();
+    localStorage.setItem('tentai_v01',JSON.stringify(o));
+  }catch(e){}
+}
+function loadSettings(){
+  try{
+    const o=JSON.parse(localStorage.getItem('tentai_v01')||'null');if(!o)return;
+    FIELDS.forEach(f=>{if(o[f]===undefined)return;const e=$(f);if(e.type==='checkbox')e.checked=o[f];else e.value=o[f];});
+    if(o.subj)placeMarkerQuiet('subj',o.subj);if(o.cam)placeMarkerQuiet('cam',o.cam);
+    const pts=[o.subj,o.cam].filter(Boolean);if(pts.length)map.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lng])),{padding:[80,80],maxZoom:16});
+  }catch(e){}
+}
+function placeMarkerQuiet(kind,ll){
+  const isS=kind==='subj';
+  const mk=L.marker(ll,{draggable:true,icon:isS?redIcon:blueIcon}).addTo(map);
+  mk.bindTooltip(isS?'被写体':'カメラ',{permanent:true,direction:'right',offset:[10,-20]});
+  mk.on('dragend',()=>refreshAll(true));
+  if(isS)subjMarker=mk;else camMarker=mk;
+}
+FIELDS.forEach(f=>$(f).addEventListener('input',async()=>{
+  if(['event','date','tz'].includes(f)||f==='event')await applyEvent();
+  clearStaleCandidates(f);refreshAll();
+}));
+function clearStaleCandidates(f){if(['date','tz','tStart','tEnd','step','subjH','subjFrac','eye'].includes(f)&&candidates.length)clearCandidates();}
+$('event').addEventListener('change',async()=>{await applyEvent();refreshAll();});
+$('pvTime').addEventListener('input',()=>refreshAll());
+if(!$('date').value){const d=new Date();$('date').value=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
+loadSettings();
+(async()=>{if($('event').value!=='manual')await applyEvent();refreshAll();})();
+</script>
+</body>
+</html>
