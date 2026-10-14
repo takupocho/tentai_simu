@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>天体＆撮影シミュレーター (Ver 0.4)</title>
+<title>天体＆撮影シミュレーター (Ver 0.5)</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -44,7 +44,7 @@ button.sec{background:#6c757d}button.warn{background:#e67e22}button.ok{backgroun
 <body>
 <div class="controls">
   <div class="brand">🌅 天体＆撮影シミュレーター</div>
-  <div class="sub">太陽・月・天の川 × 被写体 → Google Earth Pro用KMZ (Ver 0.4)</div>
+  <div class="sub">太陽・月・天の川 × 被写体 → Google Earth Pro用KMZ (Ver 0.5)</div>
   <div class="info" id="info">地図をクリックして「被写体」と「カメラ」を置いてください</div>
 
   <details open><summary>💾 保存・読込</summary>
@@ -107,6 +107,7 @@ button.sec{background:#6c757d}button.warn{background:#e67e22}button.ok{backgroun
 
   <details open><summary>5. Google Earth Pro用に書き出し</summary>
     <div class="row"><label>天球の半径(km)</label><input type="number" id="domeKm" value="20" min="2" max="200"></div>
+    <div class="row"><label>時刻の文字</label><span style="font-size:12px">大きさ</span><input type="number" id="lblSize" value="2" min="0.5" max="5" step="0.5"> <select id="lblColor"><option value="ff00e6ff">黄</option><option value="ffffffff">白</option><option value="ff1e1e9b">暗赤</option><option value="ff000000">黒</option></select></div>
     <div class="row"><label>Earthの最小画角</label><input type="number" id="minFov" value="10" min="1" max="60" step="1"><span class="help" style="margin:0">°（Earthは約10°より狭く拡大できません）</span></div>
     <div class="row"><label>開いた時の画角</label><input type="number" id="initFov" value="60" min="20" max="120" step="5"><span class="help" style="margin:0">°（時間アニメ終了後に戻す広さ）</span></div>
     <div class="row"><label>カメラ高さ</label><select id="camBase"><option value="earth">Earthの地面＋目線（標準・埋まらない）</option><option value="data">標高データ基準（プレビューと一致・埋まることあり）</option></select></div>
@@ -539,9 +540,9 @@ async function exportKmz(){
       const rad=R*Math.tan(p.r*RAD);
       const label=`${BODY_NAME[k]} ${fmtT(m)} 方位${p.az.toFixed(1)}° 高度${p.alt.toFixed(2)}°`;
       const model=ts=>`<Placemark><name>${esc(label)}</name>${ts}<Model><altitudeMode>absolute</altitudeMode><Location><longitude>${q.lng.toFixed(8)}</longitude><latitude>${q.lat.toFixed(8)}</latitude><altitude>${q.h.toFixed(2)}</altitude></Location><Orientation><heading>0</heading><tilt>0</tilt><roll>0</roll></Orientation><Scale><x>${rad.toFixed(2)}</x><y>${rad.toFixed(2)}</y><z>${rad.toFixed(2)}</z></Scale><Link><href>models/${k}.dae</href></Link></Model></Placemark>`;
-      all+=model('')+labelPt(`${BODY_NAME[k]} ${fmtT(m)}`,dome(p.az,p.alt+p.r*2.4,LR),'s_lbl');
+      all+=model('')+labelPt(`${fmtT(m)}`,dome(p.az,p.alt+p.r*2.0,LR),'s_lbl');
       const span=`<TimeSpan><begin>${iso(t0)}</begin><end>${iso(t1)}</end></TimeSpan>`;
-      timed+=model(span)+labelPt(`${BODY_NAME[k]} ${fmtT(m)}`,dome(p.az,p.alt+p.r*2.4,LR),'s_lblTime').replace('</name>','</name>'+span);
+      timed+=model(span)+labelPt(`${fmtT(m)}`,dome(p.az,p.alt+p.r*2.0,LR),'s_lblTime').replace('</name>','</name>'+span);
     }
     const trail=pts.length>1?`<Placemark><name>${BODY_NAME[k]}の軌跡</name><styleUrl>#l_${k}</styleUrl><LineString><altitudeMode>absolute</altitudeMode><coordinates>${pts.map(c3).join(' ')}</coordinates></LineString></Placemark>`:'';
     folders+=`<Folder><name>${BODY_NAME[k]}（時間スライダー連動）</name><visibility>1</visibility>${timed}</Folder><Folder><name>${BODY_NAME[k]}（全時刻を同時表示）</name>${all}${trail}</Folder>`;
@@ -567,10 +568,10 @@ async function exportKmz(){
     let st='';
     stamps.forEach((sp,i)=>{
       ks.forEach(k=>{
-        const p=skyPos(k,mkTime(sp.min),obs),q=dome(p.az,p.alt,R),tx=`📌${i+1} ${BODY_NAME[k]} ${fmtT(sp.min)}`;
+        const p=skyPos(k,mkTime(sp.min),obs),q=dome(p.az,p.alt,R),tx=`${fmtT(sp.min)}`;
         if(k==='mw'){st+=`<Placemark><name>${esc(tx)}</name><styleUrl>#s_mw</styleUrl><Point><altitudeMode>absolute</altitudeMode><coordinates>${c3(q)}</coordinates></Point></Placemark>`;return;}
         const rad=R*Math.tan(p.r*RAD);
-        st+=`<Placemark><name>${esc(tx)}</name><description>方位${p.az.toFixed(2)}° 高度${p.alt.toFixed(2)}°</description><Model><altitudeMode>absolute</altitudeMode><Location><longitude>${q.lng.toFixed(8)}</longitude><latitude>${q.lat.toFixed(8)}</latitude><altitude>${q.h.toFixed(2)}</altitude></Location><Orientation><heading>0</heading><tilt>0</tilt><roll>0</roll></Orientation><Scale><x>${rad.toFixed(2)}</x><y>${rad.toFixed(2)}</y><z>${rad.toFixed(2)}</z></Scale><Link><href>models/${k}.dae</href></Link></Model></Placemark>`+labelPt(tx,dome(p.az,p.alt+p.r*2.6,LR),'s_lblStamp');
+        st+=`<Placemark><name>${esc(tx)}</name><description>方位${p.az.toFixed(2)}° 高度${p.alt.toFixed(2)}°</description><Model><altitudeMode>absolute</altitudeMode><Location><longitude>${q.lng.toFixed(8)}</longitude><latitude>${q.lat.toFixed(8)}</latitude><altitude>${q.h.toFixed(2)}</altitude></Location><Orientation><heading>0</heading><tilt>0</tilt><roll>0</roll></Orientation><Scale><x>${rad.toFixed(2)}</x><y>${rad.toFixed(2)}</y><z>${rad.toFixed(2)}</z></Scale><Link><href>models/${k}.dae</href></Link></Model></Placemark>`+labelPt(tx,dome(p.az,p.alt+p.r*2.0,LR),'s_lblStamp');
       });
     });
     folders+=`<Folder><name>📌 スタンプ（${stamps.length}か所）</name>${st}</Folder>`;
@@ -611,7 +612,9 @@ async function exportKmz(){
     steps+=`<gx:Wait><gx:duration>3</gx:duration></gx:Wait><gx:FlyTo><gx:duration>2</gx:duration><gx:flyToMode>smooth</gx:flyToMode>${camera(ts(a),fovInit,false)}</gx:FlyTo>`;
     tour=`<gx:Tour><name>▶ 時間アニメーション（${fmtMin(a)}～${fmtMin(b)}・終了後は最初の視点へ戻ります）</name><gx:Playlist>${steps}</gx:Playlist></gx:Tour>`;
   }
-  const styles=`<Style id="s_lbl"><IconStyle><color>ffffffff</color><scale>0.5</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle><LabelStyle><color>ffffffff</color><scale>1.1</scale></LabelStyle></Style><Style id="s_lblTime"><IconStyle><color>ff7af0ff</color><scale>0.6</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle><LabelStyle><color>ff7af0ff</color><scale>1.4</scale></LabelStyle></Style><Style id="s_lblStamp"><IconStyle><color>ff00e6ff</color><scale>0.5</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle><LabelStyle><color>ff00e6ff</color><scale>1.3</scale></LabelStyle></Style><Style id="s_subj"><LineStyle><color>ff202020</color><width>2</width></LineStyle><PolyStyle><color>f0101010</color></PolyStyle></Style><Style id="s_mark"><IconStyle><color>ff3b30ff</color><scale>0.8</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/target.png</href></Icon></IconStyle></Style><Style id="s_cam"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/shapes/camera.png</href></Icon></IconStyle></Style><Style id="l_dist"><LineStyle><color>ff00d7ff</color><width>2</width></LineStyle></Style><Style id="l_sun"><LineStyle><color>ff00a5ff</color><width>2</width></LineStyle></Style><Style id="l_moon"><LineStyle><color>fff0f0f0</color><width>2</width></LineStyle></Style><Style id="l_mw"><LineStyle><color>ffffb450</color><width>2</width></LineStyle></Style><Style id="s_mw"><IconStyle><color>ffffb450</color><Icon><href>http://maps.google.com/mapfiles/kml/shapes/star.png</href></Icon></IconStyle></Style><Style id="l_plane"><LineStyle><color>c8ffd2a0</color><width>3</width></LineStyle></Style><Style id="l_planeEdge"><LineStyle><color>78ffd2a0</color><width>1</width></LineStyle></Style><Style id="l_haloFrame"><LineStyle><color>ddffffff</color><width>9</width></LineStyle></Style><Style id="l_frame"><LineStyle><color>ff0000ff</color><width>5</width></LineStyle></Style><Style id="l_cand"><LineStyle><color>ff486cd6</color><width>4</width></LineStyle></Style><Style id="s_cand"><IconStyle><color>ff486cd6</color><scale>0.9</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle></Style>`;
+  const lc=$('lblColor').value,ls=Math.max(0.5,+$('lblSize').value||2);
+  const lblStyle=id=>`<Style id="${id}"><IconStyle><color>00ffffff</color><scale>0.3</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle><LabelStyle><color>${lc}</color><scale>${ls}</scale></LabelStyle></Style>`;
+  const styles=lblStyle('s_lbl')+lblStyle('s_lblTime')+lblStyle('s_lblStamp')+`<Style id="s_subj"><LineStyle><color>ff202020</color><width>2</width></LineStyle><PolyStyle><color>f0101010</color></PolyStyle></Style><Style id="s_mark"><IconStyle><color>ff3b30ff</color><scale>0.8</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/target.png</href></Icon></IconStyle></Style><Style id="s_cam"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/shapes/camera.png</href></Icon></IconStyle></Style><Style id="l_dist"><LineStyle><color>ff00d7ff</color><width>2</width></LineStyle></Style><Style id="l_sun"><LineStyle><color>ff00a5ff</color><width>2</width></LineStyle></Style><Style id="l_moon"><LineStyle><color>fff0f0f0</color><width>2</width></LineStyle></Style><Style id="l_mw"><LineStyle><color>ffffb450</color><width>2</width></LineStyle></Style><Style id="s_mw"><IconStyle><color>ffffb450</color><Icon><href>http://maps.google.com/mapfiles/kml/shapes/star.png</href></Icon></IconStyle></Style><Style id="l_plane"><LineStyle><color>c8ffd2a0</color><width>3</width></LineStyle></Style><Style id="l_planeEdge"><LineStyle><color>78ffd2a0</color><width>1</width></LineStyle></Style><Style id="l_haloFrame"><LineStyle><color>ddffffff</color><width>9</width></LineStyle></Style><Style id="l_frame"><LineStyle><color>ff0000ff</color><width>5</width></LineStyle></Style><Style id="l_cand"><LineStyle><color>ff486cd6</color><width>4</width></LineStyle></Style><Style id="s_cand"><IconStyle><color>ff486cd6</color><scale>0.9</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle></Style>`;
   const desc=`カメラ 北緯${S.cam.lat.toFixed(6)} 東経${S.cam.lng.toFixed(6)} / 被写体 北緯${S.subj.lat.toFixed(6)} 東経${S.subj.lng.toFixed(6)} 高さ${S.H}m / ${$('date').value} UTC${$('tz').value>=0?'+':''}${$('tz').value} / 方位は真北基準`;
   const kml=`<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Document><name>${esc(name)}</name><description>${esc(desc)}</description>${camera()}${styles}${main}${folders}${tour}${`<Folder><name>固定カメラ（ダブルクリックで撮影視点へ）</name>${camera()}</Folder>`}</Document></kml>`;
   new DOMParser().parseFromString(kml,'application/xml');
@@ -622,7 +625,7 @@ async function exportKmz(){
 }
 
 /* ---------- 保存/起動 ---------- */
-const FIELDS=['subjH','subjWb','subjWt','subjFrac','eye','date','tz','event','tStart','tEnd','step','focal','orient','aim','pan','tiltAdj','refr','domeKm','solveBody','bSun','bMoon','bMw','minFov','initFov','camBase','xGround','xFrame','xCand','xTour'];
+const FIELDS=['subjH','subjWb','subjWt','subjFrac','eye','date','tz','event','tStart','tEnd','step','focal','orient','aim','pan','tiltAdj','refr','domeKm','solveBody','bSun','bMoon','bMw','lblSize','lblColor','minFov','initFov','camBase','xGround','xFrame','xCand','xTour'];
 function getState(){
   const o={};FIELDS.forEach(f=>{const e=$(f);o[f]=e.type==='checkbox'?e.checked:e.value;});
   if(subjMarker)o.subj=subjMarker.getLatLng();if(camMarker)o.cam=camMarker.getLatLng();
