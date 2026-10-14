@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>天体＆撮影シミュレーター (Ver 0.1)</title>
+<title>天体＆撮影シミュレーター (Ver 0.2)</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -44,7 +44,7 @@ button.sec{background:#6c757d}button.warn{background:#e67e22}button.ok{backgroun
 <body>
 <div class="controls">
   <div class="brand">🌅 天体＆撮影シミュレーター</div>
-  <div class="sub">太陽・月・天の川 × 被写体 → Google Earth Pro用KMZ (Ver 0.1)</div>
+  <div class="sub">太陽・月・天の川 × 被写体 → Google Earth Pro用KMZ (Ver 0.2)</div>
   <div class="info" id="info">地図をクリックして「被写体」と「カメラ」を置いてください</div>
 
   <details open><summary>💾 保存・読込</summary>
@@ -107,6 +107,8 @@ button.sec{background:#6c757d}button.warn{background:#e67e22}button.ok{backgroun
 
   <details open><summary>5. Google Earth Pro用に書き出し</summary>
     <div class="row"><label>天球の半径(km)</label><input type="number" id="domeKm" value="20" min="2" max="200"></div>
+    <div class="row"><label>カメラ高さ</label><select id="camBase"><option value="data">標高データ基準（プレビューと一致）</option><option value="earth">Earthの地面＋目線（従来）</option></select></div>
+    <div class="help" style="margin-top:-2px">「標高データ基準」は、カメラ・被写体・赤枠・天体が同じ高さ基準になるため、プレビューと同じ重なりに見えます。Earthの地形と数mずれると、カメラが地面に埋まる/浮くことがあります。</div>
     <div class="row"><label style="min-width:auto;font-weight:400"><input type="checkbox" id="xGround" checked>地面レベルビュー</label>
       <label style="min-width:auto;font-weight:400"><input type="checkbox" id="xFrame" checked>赤枠</label>
       <label style="min-width:auto;font-weight:400"><input type="checkbox" id="xCand" checked>候補ライン</label>
@@ -270,14 +272,19 @@ function vfov(S){return 2*Math.atan(sensor(S).h/(2*S.focal))*DEG;}
 const windowMin=()=>{let a=parseHM($('tStart').value),b=parseHM($('tEnd').value);if(b<=a)b+=1440;return [a,b];};
 function obsOf(S){const p=S.cam||S.subj||{lat:map.getCenter().lat,lng:map.getCenter().lng,g:0,h:0};return new Astronomy.Observer(p.lat,p.lng,p.h??p.g??0);}
 // 被写体の目標点とカメラの関係
+function enuFrom(o,lat,lng,h){
+  // カメラ位置 o から見た (lat,lng,h) の東・北・上(m)。天体の配置と同じ楕円体計算なので、方位・仰角が一致する。
+  const c0=toEcef(o.lat,o.lng,o.h),c1=toEcef(lat,lng,h),d=[c1[0]-c0[0],c1[1]-c0[1],c1[2]-c0[2]];
+  const p=o.lat*RAD,l=o.lng*RAD;
+  const E=[-Math.sin(l),Math.cos(l),0],N=[-Math.sin(p)*Math.cos(l),-Math.sin(p)*Math.sin(l),Math.cos(p)],U=[Math.cos(p)*Math.cos(l),Math.cos(p)*Math.sin(l),Math.sin(p)];
+  return {e:dot(d,E),n:dot(d,N),u:dot(d,U)};
+}
 function subjGeometry(S){
   if(!S.subj||!S.cam)return null;
-  const d=hdist(S.cam.lat,S.cam.lng,S.subj.lat,S.subj.lng);
-  const az=bearing(S.cam.lat,S.cam.lng,S.subj.lat,S.subj.lng);
-  const altT=Math.atan2(S.targetAbs-S.cam.h,d)*DEG;
-  const altTop=Math.atan2(S.subj.g+S.H-S.cam.h,d)*DEG;
-  const altBase=Math.atan2(S.subj.g-S.cam.h,d)*DEG;
-  return {d,az,altT,altTop,altBase};
+  const o={lat:S.cam.lat,lng:S.cam.lng,h:S.cam.h};
+  const t=enuFrom(o,S.subj.lat,S.subj.lng,S.targetAbs),tp=enuFrom(o,S.subj.lat,S.subj.lng,S.subj.g+S.H),bs=enuFrom(o,S.subj.lat,S.subj.lng,S.subj.g);
+  const d=Math.hypot(t.e,t.n),az=(Math.atan2(t.e,t.n)*DEG+360)%360;
+  return {d,az,altT:Math.atan2(t.u,d)*DEG,altTop:Math.atan2(tp.u,Math.hypot(tp.e,tp.n))*DEG,altBase:Math.atan2(bs.u,Math.hypot(bs.e,bs.n))*DEG};
 }
 // 光軸の向き(方位・仰角)
 function aimOf(S,min){
@@ -458,7 +465,7 @@ async function computeCandidates(S,key){
     for(let it=0;it<8&&!conv;it++){
       d=(S.targetAbs-(gnd+S.eye))/Math.tan(p.alt*RAD);
       if(!(d>30&&d<40000)){ok=false;break;}
-      pos=destPoint(S.subj.lat,S.subj.lng,back,d);
+      pos=enuToGeo({lat:S.subj.lat,lng:S.subj.lng,h:0},d*Math.sin(back*RAD),d*Math.cos(back*RAD),0);
       const gn=await getElevation(pos.lat,pos.lng);
       conv=Math.abs(gn-gnd)<0.5;
       gnd=conv?gnd:gn;   // 収束しない場合は最後の標高で距離を再計算する
@@ -466,7 +473,7 @@ async function computeCandidates(S,key){
     if(ok){
       d=(S.targetAbs-(gnd+S.eye))/Math.tan(p.alt*RAD);
       if(!(d>30&&d<40000))continue;
-      pos=destPoint(S.subj.lat,S.subj.lng,back,d);
+      pos=enuToGeo({lat:S.subj.lat,lng:S.subj.lng,h:0},d*Math.sin(back*RAD),d*Math.cos(back*RAD),0);
       out.push({m,az:p.az,alt:p.alt,d,lat:pos.lat,lng:pos.lng,g:gnd});
     }
   }
@@ -572,7 +579,8 @@ async function exportKmz(){
   const mid=Math.round((a+b)/2);
   const aim=aimOf(S,curMin()||mid),B=camBasis(aim.az,aim.alt);
   const hf=hfov(S);
-  const camera=(extra='')=>`<Camera>${$('xGround').checked?'<gx:ViewerOptions><gx:option name="groundlevel" enabled="1"/></gx:ViewerOptions>':''}${extra}<longitude>${S.cam.lng.toFixed(8)}</longitude><latitude>${S.cam.lat.toFixed(8)}</latitude><altitude>${$('xGround').checked?S.eye:S.cam.h.toFixed(2)}</altitude><heading>${((aim.az%360)+360)%360}</heading><tilt>${(90+aim.alt).toFixed(3)}</tilt><roll>0</roll><altitudeMode>${$('xGround').checked?'relativeToGround':'absolute'}</altitudeMode><gx:horizFov>${hf.toFixed(3)}</gx:horizFov></Camera>`;
+  const earthBase=$('camBase').value==='earth';
+  const camera=(extra='')=>`<Camera>${$('xGround').checked?'<gx:ViewerOptions><gx:option name="groundlevel" enabled="1"/></gx:ViewerOptions>':''}${extra}<longitude>${S.cam.lng.toFixed(8)}</longitude><latitude>${S.cam.lat.toFixed(8)}</latitude><altitude>${earthBase?S.eye:S.cam.h.toFixed(2)}</altitude><heading>${((aim.az%360)+360)%360}</heading><tilt>${(90+aim.alt).toFixed(3)}</tilt><roll>0</roll><altitudeMode>${earthBase?'relativeToGround':'absolute'}</altitudeMode><gx:horizFov>${hf.toFixed(3)}</gx:horizFov></Camera>`;
   if($('xFrame').checked){
     const sn=sensor(S),dist=Math.max(g.d,200)/Math.cos(Math.max(-1.2,Math.min(1.2,aim.alt*RAD)));
     const cs=[[-1,-1],[1,-1],[1,1],[-1,1],[-1,-1]].map(([sx,sy])=>{
@@ -595,7 +603,7 @@ async function exportKmz(){
     for(let m=a;m<=b+0.01;m+=stepM)steps+=`<gx:FlyTo><gx:duration>0.6</gx:duration><gx:flyToMode>smooth</gx:flyToMode>${camera(`<gx:TimeStamp><when>${iso(mkTime(m))}</when></gx:TimeStamp>`)}</gx:FlyTo>`;
     tour=`<gx:Tour><name>▶ 時間アニメーション（${fmtMin(a)}～${fmtMin(b)}）</name><gx:Playlist>${steps}</gx:Playlist></gx:Tour>`;
   }
-  const styles=`<Style id="s_lbl"><IconStyle><scale>0</scale></IconStyle><LabelStyle><color>ffffffff</color><scale>0.8</scale></LabelStyle></Style><Style id="s_lblStamp"><IconStyle><scale>0</scale></IconStyle><LabelStyle><color>ff00e6ff</color><scale>1.2</scale></LabelStyle></Style><Style id="s_subj"><LineStyle><color>ff202020</color><width>2</width></LineStyle><PolyStyle><color>f0101010</color></PolyStyle></Style><Style id="s_mark"><IconStyle><color>ff3b30ff</color><scale>0.8</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/target.png</href></Icon></IconStyle></Style><Style id="s_cam"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/shapes/camera.png</href></Icon></IconStyle></Style><Style id="l_dist"><LineStyle><color>ff00d7ff</color><width>2</width></LineStyle></Style><Style id="l_sun"><LineStyle><color>ff00a5ff</color><width>2</width></LineStyle></Style><Style id="l_moon"><LineStyle><color>fff0f0f0</color><width>2</width></LineStyle></Style><Style id="l_mw"><LineStyle><color>ffffb450</color><width>2</width></LineStyle></Style><Style id="s_mw"><IconStyle><color>ffffb450</color><Icon><href>http://maps.google.com/mapfiles/kml/shapes/star.png</href></Icon></IconStyle></Style><Style id="l_plane"><LineStyle><color>c8ffd2a0</color><width>3</width></LineStyle></Style><Style id="l_planeEdge"><LineStyle><color>78ffd2a0</color><width>1</width></LineStyle></Style><Style id="l_haloFrame"><LineStyle><color>ddffffff</color><width>9</width></LineStyle></Style><Style id="l_frame"><LineStyle><color>ff0000ff</color><width>5</width></LineStyle></Style><Style id="l_cand"><LineStyle><color>ff486cd6</color><width>4</width></LineStyle></Style><Style id="s_cand"><IconStyle><color>ff486cd6</color><scale>0.9</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle></Style>`;
+  const styles=`<Style id="s_lbl"><IconStyle><color>ffffffff</color><scale>0.35</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle><LabelStyle><color>ffffffff</color><scale>0.9</scale></LabelStyle></Style><Style id="s_lblStamp"><IconStyle><color>ff00e6ff</color><scale>0.5</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle><LabelStyle><color>ff00e6ff</color><scale>1.3</scale></LabelStyle></Style><Style id="s_subj"><LineStyle><color>ff202020</color><width>2</width></LineStyle><PolyStyle><color>f0101010</color></PolyStyle></Style><Style id="s_mark"><IconStyle><color>ff3b30ff</color><scale>0.8</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/target.png</href></Icon></IconStyle></Style><Style id="s_cam"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/shapes/camera.png</href></Icon></IconStyle></Style><Style id="l_dist"><LineStyle><color>ff00d7ff</color><width>2</width></LineStyle></Style><Style id="l_sun"><LineStyle><color>ff00a5ff</color><width>2</width></LineStyle></Style><Style id="l_moon"><LineStyle><color>fff0f0f0</color><width>2</width></LineStyle></Style><Style id="l_mw"><LineStyle><color>ffffb450</color><width>2</width></LineStyle></Style><Style id="s_mw"><IconStyle><color>ffffb450</color><Icon><href>http://maps.google.com/mapfiles/kml/shapes/star.png</href></Icon></IconStyle></Style><Style id="l_plane"><LineStyle><color>c8ffd2a0</color><width>3</width></LineStyle></Style><Style id="l_planeEdge"><LineStyle><color>78ffd2a0</color><width>1</width></LineStyle></Style><Style id="l_haloFrame"><LineStyle><color>ddffffff</color><width>9</width></LineStyle></Style><Style id="l_frame"><LineStyle><color>ff0000ff</color><width>5</width></LineStyle></Style><Style id="l_cand"><LineStyle><color>ff486cd6</color><width>4</width></LineStyle></Style><Style id="s_cand"><IconStyle><color>ff486cd6</color><scale>0.9</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle></Style>`;
   const desc=`カメラ 北緯${S.cam.lat.toFixed(6)} 東経${S.cam.lng.toFixed(6)} / 被写体 北緯${S.subj.lat.toFixed(6)} 東経${S.subj.lng.toFixed(6)} 高さ${S.H}m / ${$('date').value} UTC${$('tz').value>=0?'+':''}${$('tz').value} / 方位は真北基準`;
   const kml=`<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Document><name>${esc(name)}</name><description>${esc(desc)}</description>${camera()}${styles}${main}${folders}${tour}${`<Folder><name>固定カメラ（ダブルクリックで撮影視点へ）</name>${camera()}</Folder>`}</Document></kml>`;
   new DOMParser().parseFromString(kml,'application/xml');
@@ -606,7 +614,7 @@ async function exportKmz(){
 }
 
 /* ---------- 保存/起動 ---------- */
-const FIELDS=['subjH','subjWb','subjWt','subjFrac','eye','date','tz','event','tStart','tEnd','step','focal','orient','aim','pan','tiltAdj','refr','domeKm','solveBody','bSun','bMoon','bMw','xGround','xFrame','xCand','xTour'];
+const FIELDS=['subjH','subjWb','subjWt','subjFrac','eye','date','tz','event','tStart','tEnd','step','focal','orient','aim','pan','tiltAdj','refr','domeKm','solveBody','bSun','bMoon','bMw','camBase','xGround','xFrame','xCand','xTour'];
 function getState(){
   const o={};FIELDS.forEach(f=>{const e=$(f);o[f]=e.type==='checkbox'?e.checked:e.value;});
   if(subjMarker)o.subj=subjMarker.getLatLng();if(camMarker)o.cam=camMarker.getLatLng();
