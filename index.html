@@ -54,6 +54,8 @@ button.sec{background:#6c757d}button.warn{background:#e67e22}button.ok{backgroun
     </div>
     <div class="row"><label>被写体</label><input type="text" id="subjPos" placeholder="緯度, 経度を貼り付け"><button class="sec" onclick="applyPos('subj',$('subjPos').value)">反映</button></div>
     <div class="row"><label>地面の標高</label><input type="text" id="subjElev" readonly style="max-width:90px"> <label style="min-width:auto">高さ(m)</label><input type="number" id="subjH" value="30" min="0" step="1"></div>
+    <div class="row"><label>幅(m)</label><span style="font-size:12px">根元</span><input type="number" id="subjWb" value="6" min="0.1" step="0.5"> <span style="font-size:12px">頂上</span><input type="number" id="subjWt" value="3" min="0.1" step="0.5"></div>
+    <div class="help" style="margin-top:-2px">被写体は幅と高さの台形（正面向き）として、プレビューとEarthに表示します。</div>
     <div class="row"><label>重ねる位置</label><input type="number" id="subjFrac" value="70" min="0" max="100" step="5"> <span class="help" style="margin:0">被写体の高さの何%に天体の中心を合わせるか</span></div>
     <div class="row"><label>カメラ</label><input type="text" id="camPos" placeholder="緯度, 経度を貼り付け"><button class="sec" onclick="applyPos('cam',$('camPos').value)">反映</button></div>
     <div class="row"><label>地面の標高</label><input type="text" id="camElev" readonly style="max-width:90px"> <label style="min-width:auto">目線(m)</label><input type="number" id="eye" value="1.7" step="0.1"></div>
@@ -131,7 +133,11 @@ const blueIcon=L.icon({iconUrl:'https://raw.githubusercontent.com/pointhi/leafle
 
 function setMode(m){document.querySelectorAll('input[name=mode]').forEach(r=>r.checked=r.value===m);$('mSubj').classList.toggle('active',m==='subj');$('mCam').classList.toggle('active',m==='cam');}
 document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener('change',()=>setMode(r.value)));
-map.on('click',e=>{const m=document.querySelector('input[name=mode]:checked').value;placeMarker(m,e.latlng);});
+map.on('click',e=>{
+  const m=document.querySelector('input[name=mode]:checked').value;
+  if((m==='subj'&&subjMarker)||(m==='cam'&&camMarker)){$('info').textContent=(m==='subj'?'被写体':'カメラ')+'はドラッグで動かしてください（誤クリック防止）';return;}
+  placeMarker(m,e.latlng);
+});
 
 function placeMarker(kind,ll){
   const isS=kind==='subj';
@@ -141,7 +147,7 @@ function placeMarker(kind,ll){
     mk.bindTooltip(isS?'被写体':'カメラ',{permanent:true,direction:'right',offset:[10,-20]});
     mk.on('dragend',()=>refreshAll(true));
     if(isS)subjMarker=mk;else camMarker=mk;
-    if(isS&&!camMarker)setMode('cam');
+    if(isS&&!camMarker)setMode('cam');else if(!isS&&!subjMarker)setMode('subj');
   }else mk.setLatLng(ll);
   refreshAll(true);
 }
@@ -231,7 +237,7 @@ const activeBodies=()=>['sun','moon','mw'].filter(k=>$({sun:'bSun',moon:'bMoon',
 /* ---------- 状態 ---------- */
 async function readState(){
   const S={focal:+$('focal').value||50,portrait:$('orient').value==='portrait',eye:+$('eye').value||0,
-    H:+$('subjH').value||0,frac:(+$('subjFrac').value||0)/100,pan:+$('pan').value||0,tiltAdj:+$('tiltAdj').value||0};
+    H:+$('subjH').value||0,Wb:+$('subjWb').value||1,Wt:+$('subjWt').value||1,frac:(+$('subjFrac').value||0)/100,pan:+$('pan').value||0,tiltAdj:+$('tiltAdj').value||0};
   if(subjMarker){const p=subjMarker.getLatLng();S.subj={lat:p.lat,lng:p.lng,g:await getElevation(p.lat,p.lng)};}
   if(camMarker){const p=camMarker.getLatLng();S.cam={lat:p.lat,lng:p.lng,g:await getElevation(p.lat,p.lng)};S.cam.h=S.cam.g+S.eye;}
   if(S.subj)S.targetAbs=S.subj.g+S.H*S.frac;
@@ -356,9 +362,10 @@ function drawPreview(S){
   });
   // 被写体(根元～頂上)
   const top=proj(g.az,g.altTop),base=proj(g.az,g.altBase),tgt=proj(g.az,g.altT);
-  if(top&&base){
-    const wpx=Math.max(1.5,S.focal*Math.atan2(Math.max(1,S.H*0.04),g.d)*K);
-    out+=`<line x1="${base.x.toFixed(1)}" y1="${base.y.toFixed(1)}" x2="${top.x.toFixed(1)}" y2="${top.y.toFixed(1)}" stroke="#050505" stroke-width="${wpx.toFixed(1)}"/>`;
+  {
+    const pt=(w,alt)=>{const da=Math.atan2(w/2,g.d)*DEG/Math.max(0.2,Math.cos(alt*RAD));return [proj(g.az-da,alt),proj(g.az+da,alt)];};
+    const [bl,br]=pt(S.Wb,g.altBase),[tl,tr]=pt(S.Wt,g.altTop);
+    if(bl&&br&&tl&&tr)out+=`<polygon points="${[bl,br,tr,tl].map(q=>q.x.toFixed(1)+','+q.y.toFixed(1)).join(' ')}" fill="#050505" stroke="#000" stroke-width=".5"/>`;
   }
   if(tgt)out+=`<g stroke="#ff3b30" stroke-width="0.8"><line x1="${tgt.x-5}" y1="${tgt.y}" x2="${tgt.x+5}" y2="${tgt.y}"/><line x1="${tgt.x}" y1="${tgt.y-5}" x2="${tgt.x}" y2="${tgt.y+5}"/></g>`;
   out+='</g>';
@@ -383,8 +390,10 @@ function overlapAnalysis(S){
     const p=best.p;
     const dAz=((p.az-g.az+540)%360-180)*Math.cos(p.alt*RAD);
     const where=p.alt>g.altTop?'頂上より上':p.alt<g.altBase?'根元より下':'塔の高さの範囲内';
+    const wAt=S.Wb+(S.Wt-S.Wb)*S.frac,halfW=Math.atan2(wAt/2,g.d)*DEG;
+    const inW=Math.abs(dAz)<=halfW?'幅の中':'幅の外';
     const hit=best.s<=p.r?'◎ 目標点に重なる':best.s<=p.r*2?'○ ほぼ重なる':'× ずれる';
-    txt+=`${BODY_NAME[k]}: 最接近 ${fmtMin(best.m)}（${best.s.toFixed(2)}° / 視半径${p.r.toFixed(2)}°） ${hit}\n  そのとき高度${p.alt.toFixed(2)}° 方位差 ${dAz>=0?'+':''}${dAz.toFixed(2)}°（${dAz>=0?'右':'左'}へずれ）縦位置: ${where}\n`;
+    txt+=`${BODY_NAME[k]}: 最接近 ${fmtMin(best.m)}（${best.s.toFixed(2)}° / 視半径${p.r.toFixed(2)}°） ${hit}\n  そのとき高度${p.alt.toFixed(2)}° 方位差 ${dAz>=0?'+':''}${dAz.toFixed(2)}°（${dAz>=0?'右':'左'}へずれ）縦位置: ${where} / 横位置: ${inW}（その高さの幅 ±${halfW.toFixed(2)}°）\n`;
   });
   txt+=`被写体の見かけの大きさ 高さ${(Math.atan2(S.H,g.d)*DEG).toFixed(2)}°（太陽の約${(Math.atan2(S.H,g.d)*DEG/0.533).toFixed(1)}倍）`;
   el.textContent=txt;
@@ -400,14 +409,21 @@ async function computeCandidates(S,key){
     if(p.alt<0.15||p.alt>60)continue;
     // 最初は被写体と同じ高さの地面を仮定し、候補位置の標高で数回補正する
     const back=(p.az+180)%360;let gnd=S.subj.g,d=0,pos=null,ok=true;
-    for(let it=0;it<4;it++){
-      const dh=S.targetAbs-(gnd+S.eye);
-      d=dh/Math.tan(p.alt*RAD);
+    let conv=false;
+    for(let it=0;it<8&&!conv;it++){
+      d=(S.targetAbs-(gnd+S.eye))/Math.tan(p.alt*RAD);
       if(!(d>30&&d<40000)){ok=false;break;}
       pos=destPoint(S.subj.lat,S.subj.lng,back,d);
-      gnd=await getElevation(pos.lat,pos.lng);
+      const gn=await getElevation(pos.lat,pos.lng);
+      conv=Math.abs(gn-gnd)<0.5;
+      gnd=conv?gnd:gn;   // 収束しない場合は最後の標高で距離を再計算する
     }
-    if(ok)out.push({m,az:p.az,alt:p.alt,d,lat:pos.lat,lng:pos.lng,g:gnd});
+    if(ok){
+      d=(S.targetAbs-(gnd+S.eye))/Math.tan(p.alt*RAD);
+      if(!(d>30&&d<40000))continue;
+      pos=destPoint(S.subj.lat,S.subj.lng,back,d);
+      out.push({m,az:p.az,alt:p.alt,d,lat:pos.lat,lng:pos.lng,g:gnd});
+    }
   }
   return out;
 }
@@ -489,9 +505,10 @@ async function exportKmz(){
     folders+=`<Folder><name>天の川の中心（${toHM((a+b)/2)}時点の銀河面つき）</name>${lp.length>1?`<Placemark><name>天の川の中心の軌跡</name><styleUrl>#l_mw</styleUrl><LineString><altitudeMode>absolute</altitudeMode><coordinates>${lp.map(c3).join(' ')}</coordinates></LineString></Placemark>`:''}${marks}${plane}</Folder>`;
   }
   // 被写体・カメラ・赤枠
-  const sTop=enuToGeo({lat:S.subj.lat,lng:S.subj.lng,h:S.subj.g},0,0,S.H);
   const sTgt=enuToGeo({lat:S.subj.lat,lng:S.subj.lng,h:S.subj.g},0,0,S.H*S.frac);
-  let main=`<Folder><name>被写体とカメラ</name><Placemark><name>被写体（高さ${S.H}m）</name><styleUrl>#s_subj</styleUrl><LineString><extrude>1</extrude><altitudeMode>absolute</altitudeMode><coordinates>${c3({lat:S.subj.lat,lng:S.subj.lng,h:S.subj.g})} ${c3(sTop)}</coordinates></LineString></Placemark><Placemark><name>重ねる位置（${Math.round(S.frac*100)}%）</name><styleUrl>#s_mark</styleUrl><Point><altitudeMode>absolute</altitudeMode><coordinates>${c3(sTgt)}</coordinates></Point></Placemark><Placemark><name>カメラ位置</name><styleUrl>#s_cam</styleUrl><Point><altitudeMode>absolute</altitudeMode><coordinates>${c3(camO)}</coordinates></Point></Placemark><Placemark><name>カメラ→被写体</name><styleUrl>#l_dist</styleUrl><LineString><altitudeMode>absolute</altitudeMode><coordinates>${c3(camO)} ${c3(sTgt)}</coordinates></LineString></Placemark></Folder>`;
+  const so={lat:S.subj.lat,lng:S.subj.lng,h:S.subj.g},rv=[Math.cos(g.az*RAD),-Math.sin(g.az*RAD)];
+  const wall=[[-S.Wb/2,0],[S.Wb/2,0],[S.Wt/2,S.H],[-S.Wt/2,S.H],[-S.Wb/2,0]].map(([x,z])=>enuToGeo(so,rv[0]*x,rv[1]*x,z));
+  let main=`<Folder><name>被写体とカメラ</name><Placemark><name>被写体（高さ${S.H}m・幅${S.Wb}→${S.Wt}m）</name><styleUrl>#s_subj</styleUrl><Polygon><altitudeMode>absolute</altitudeMode><outerBoundaryIs><LinearRing><coordinates>${wall.map(c3).join(' ')}</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark><Placemark><name>重ねる位置（${Math.round(S.frac*100)}%）</name><styleUrl>#s_mark</styleUrl><Point><altitudeMode>absolute</altitudeMode><coordinates>${c3(sTgt)}</coordinates></Point></Placemark><Placemark><name>カメラ位置</name><styleUrl>#s_cam</styleUrl><Point><altitudeMode>absolute</altitudeMode><coordinates>${c3(camO)}</coordinates></Point></Placemark><Placemark><name>カメラ→被写体</name><styleUrl>#l_dist</styleUrl><LineString><altitudeMode>absolute</altitudeMode><coordinates>${c3(camO)} ${c3(sTgt)}</coordinates></LineString></Placemark></Folder>`;
   // 視点
   const mid=Math.round((a+b)/2);
   const aim=aimOf(S,+$('pvTime').value||mid),B=camBasis(aim.az,aim.alt);
@@ -519,7 +536,7 @@ async function exportKmz(){
     for(let m=a;m<=b+0.01;m+=stepM)steps+=`<gx:FlyTo><gx:duration>0.6</gx:duration><gx:flyToMode>smooth</gx:flyToMode>${camera(`<gx:TimeStamp><when>${iso(mkTime(m))}</when></gx:TimeStamp>`)}</gx:FlyTo>`;
     tour=`<gx:Tour><name>▶ 時間アニメーション（${fmtMin(a)}～${fmtMin(b)}）</name><gx:Playlist>${steps}</gx:Playlist></gx:Tour>`;
   }
-  const styles=`<Style id="s_subj"><LineStyle><color>ff0000ff</color><width>5</width></LineStyle><PolyStyle><color>440000ff</color></PolyStyle></Style><Style id="s_mark"><IconStyle><color>ff3b30ff</color><scale>0.8</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/target.png</href></Icon></IconStyle></Style><Style id="s_cam"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/shapes/camera.png</href></Icon></IconStyle></Style><Style id="l_dist"><LineStyle><color>ff00d7ff</color><width>2</width></LineStyle></Style><Style id="l_sun"><LineStyle><color>ff00a5ff</color><width>2</width></LineStyle></Style><Style id="l_moon"><LineStyle><color>fff0f0f0</color><width>2</width></LineStyle></Style><Style id="l_mw"><LineStyle><color>ffffb450</color><width>2</width></LineStyle></Style><Style id="s_mw"><IconStyle><color>ffffb450</color><Icon><href>http://maps.google.com/mapfiles/kml/shapes/star.png</href></Icon></IconStyle></Style><Style id="l_plane"><LineStyle><color>c8ffd2a0</color><width>3</width></LineStyle></Style><Style id="l_planeEdge"><LineStyle><color>78ffd2a0</color><width>1</width></LineStyle></Style><Style id="l_haloFrame"><LineStyle><color>ddffffff</color><width>9</width></LineStyle></Style><Style id="l_frame"><LineStyle><color>ff0000ff</color><width>5</width></LineStyle></Style><Style id="l_cand"><LineStyle><color>ff486cd6</color><width>4</width></LineStyle></Style><Style id="s_cand"><IconStyle><color>ff486cd6</color><scale>0.9</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle></Style>`;
+  const styles=`<Style id="s_subj"><LineStyle><color>ff202020</color><width>2</width></LineStyle><PolyStyle><color>f0101010</color></PolyStyle></Style><Style id="s_mark"><IconStyle><color>ff3b30ff</color><scale>0.8</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/target.png</href></Icon></IconStyle></Style><Style id="s_cam"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/shapes/camera.png</href></Icon></IconStyle></Style><Style id="l_dist"><LineStyle><color>ff00d7ff</color><width>2</width></LineStyle></Style><Style id="l_sun"><LineStyle><color>ff00a5ff</color><width>2</width></LineStyle></Style><Style id="l_moon"><LineStyle><color>fff0f0f0</color><width>2</width></LineStyle></Style><Style id="l_mw"><LineStyle><color>ffffb450</color><width>2</width></LineStyle></Style><Style id="s_mw"><IconStyle><color>ffffb450</color><Icon><href>http://maps.google.com/mapfiles/kml/shapes/star.png</href></Icon></IconStyle></Style><Style id="l_plane"><LineStyle><color>c8ffd2a0</color><width>3</width></LineStyle></Style><Style id="l_planeEdge"><LineStyle><color>78ffd2a0</color><width>1</width></LineStyle></Style><Style id="l_haloFrame"><LineStyle><color>ddffffff</color><width>9</width></LineStyle></Style><Style id="l_frame"><LineStyle><color>ff0000ff</color><width>5</width></LineStyle></Style><Style id="l_cand"><LineStyle><color>ff486cd6</color><width>4</width></LineStyle></Style><Style id="s_cand"><IconStyle><color>ff486cd6</color><scale>0.9</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle></Style>`;
   const desc=`カメラ 北緯${S.cam.lat.toFixed(6)} 東経${S.cam.lng.toFixed(6)} / 被写体 北緯${S.subj.lat.toFixed(6)} 東経${S.subj.lng.toFixed(6)} 高さ${S.H}m / ${$('date').value} UTC${$('tz').value>=0?'+':''}${$('tz').value} / 方位は真北基準`;
   const kml=`<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Document><name>${esc(name)}</name><description>${esc(desc)}</description>${camera()}${styles}${main}${folders}${tour}${`<Folder><name>固定カメラ（ダブルクリックで撮影視点へ）</name>${camera()}</Folder>`}</Document></kml>`;
   new DOMParser().parseFromString(kml,'application/xml');
@@ -530,7 +547,7 @@ async function exportKmz(){
 }
 
 /* ---------- 保存/起動 ---------- */
-const FIELDS=['subjH','subjFrac','eye','date','tz','event','tStart','tEnd','step','focal','orient','aim','pan','tiltAdj','refr','domeKm','solveBody','bSun','bMoon','bMw','xGround','xFrame','xCand','xTour'];
+const FIELDS=['subjH','subjWb','subjWt','subjFrac','eye','date','tz','event','tStart','tEnd','step','focal','orient','aim','pan','tiltAdj','refr','domeKm','solveBody','bSun','bMoon','bMw','xGround','xFrame','xCand','xTour'];
 function saveSettings(){
   try{
     const o={};FIELDS.forEach(f=>{const e=$(f);o[f]=e.type==='checkbox'?e.checked:e.value;});
